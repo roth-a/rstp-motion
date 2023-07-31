@@ -179,6 +179,7 @@ class Foscam(BaseMotionEnabledCamera):
         return self.api.set_audio_alarm_config(enabled=enabled, sensitivity=sensitivity)
 
 
+            
 
 class MotionRecorder():
     def __init__(self, camera : Camera, video_recording_length=10, past_video_recording_length=2,
@@ -434,6 +435,54 @@ class MotionRecorder():
                 self.camera.free()
                 
 
+
+
+
+
+import subprocess as sp
+class FFMPEGRecorder(MotionRecorder):
+    def __init__(self, camera : Camera, video_recording_length=10, past_video_recording_length=2,
+              enable_motion_alarm=True, enable_sound_alarm=False, rec_folder = '/tmp', mailer=None):
+        super().__init__(camera, video_recording_length=video_recording_length, past_video_recording_length=past_video_recording_length,
+              enable_motion_alarm=enable_motion_alarm, enable_sound_alarm=enable_sound_alarm, rec_folder = rec_folder, mailer=mailer)
+
+
+    def record_video(self):
+        self.create_data_folder()
+        filename = os.path.join(self.rec_folder, f"frame_{datetime.datetime.now()}.mp4")
+
+        self.command = [
+            'ffmpeg',
+#            '-t', str(self.video_recording_length),  # Duration of the recording
+            '-i', self.camera.url_rtsp(),  # Input RTSP URL
+            '-c:v', 'copy',  # Copy video stream directly without re-encoding
+            '-c:a', 'aac',  # Re-encode audio stream to AAC
+            '-strict', 'experimental',
+            '-f', 'mp4',  # Output format
+            filename
+        ]
+
+        # Run the ffmpeg command in a subprocess.
+        self.process = sp.Popen(self.command, stdin=sp.PIPE)
+        time.sleep(self.video_recording_length)
+        self.stop()
+        return filename
+
+    def stop(self):
+        if self.process is not None:
+            # Send 'q' to the ffmpeg process to stop recording
+            self.process.communicate(b'q')
+
+            # Check if process has really terminated. 
+            # 0 means subprocess ended successfully. 
+            # None means subprocess is still running.
+            if self.process.poll() is None:
+                print("Process is running even after sending stop command. Let's kill it.")
+                self.process.kill()  # Brutally stop the process, might corrupt the output file.
+                self.process.wait()  # Wait for the process to terminate
+
+            self.process = None
+
  
 def load_config():
     folder = os.path.dirname(os.path.abspath( __file__))
@@ -482,7 +531,7 @@ if __name__ == "__main__":
         import cv2            
         mailer = Mailer(enable_send_email=True,  mail_address=args.mail_address, smtp_server=args.smtp_server, smtp_port=args.smtp_port) if args.enable_mailer else None
         camera = Foscam(args.username, args.password, args.ip, past_video_recording_length=args.past_video_recording_length, port=args.port)
-        mr = MotionRecorder(camera, video_recording_length=args.video_recording_length, rec_folder=args.rec_folder, mailer=mailer, enable_sound_alarm=args.enable_sound_alarm)
+        mr = FFMPEGRecorder(camera, video_recording_length=args.video_recording_length, rec_folder=args.rec_folder, mailer=mailer, enable_sound_alarm=args.enable_sound_alarm)
 
 
 
